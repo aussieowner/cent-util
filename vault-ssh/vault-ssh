@@ -14,57 +14,55 @@ from select import select
 
 
 def digIPAddress(nameServer, hostFQDN):
-	cmd = 'dig +short @' + nameServer + ' ' + hostFQDN
-	proc=subprocess.Popen(shlex.split(cmd),stdout=subprocess.PIPE)
-	out,err=proc.communicate()
-	return out.strip()
-   
-   
-#main()
+    cmd = 'dig +short @' + nameServer + ' ' + hostFQDN
+    proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE)
+    out, err = proc.communicate()
+    return out.strip()
+
+
+# main()
 
 # reading variables from config file
 config = ConfigParser.ConfigParser()
 config.read('config.ini')
-dnsServer = config.get('Properties','dnsServer')
+dnsServer = config.get('Properties', 'dnsServer')
 
 # Parse some info from commandline
 if len(sys.argv) != 2:
-	print "usage is %s <username@hostname>" % sys.argv[0]
-	sys.exit(1)
+    print
+    "usage is %s <username@hostname>" % sys.argv[0]
+    sys.exit(1)
 
 logins = sys.argv[1].split(":")
 
 if len(logins) == 2:
-	cloudUser = logins[0]
-	targetLogin = logins[1]
-	targetAccount = targetLogin.split("@")[0]
-	targetServerFQDN = targetLogin.split("@")[1]
-	targetServerIP = digIPAddress(dnsServer, targetServerFQDN)
+    cloudUser = logins[0]
+    targetLogin = logins[1]
+    targetAccount = targetLogin.split("@")[0]
+    targetServerFQDN = targetLogin.split("@")[1]
+    targetServerIP = digIPAddress(dnsServer, targetServerFQDN)
 
 if len(logins) == 1:
-	targetLogin = logins[0]
-	targetAccount = targetLogin.split("@")[0]
-	targetServerFQDN = targetLogin.split("@")[1]
-	targetServerIP = digIPAddress(dnsServer, targetServerFQDN)
+    targetLogin = logins[0]
+    targetAccount = targetLogin.split("@")[0]
+    targetServerFQDN = targetLogin.split("@")[1]
+    targetServerIP = digIPAddress(dnsServer, targetServerFQDN)
 
-	try:
-		cloudUser = config.get('Properties','cloudUser')
-	except:
-		cloudUser = raw_input("UserID: ")
-
+    try:
+        cloudUser = config.get('Properties', 'cloudUser')
+    except:
+        cloudUser = raw_input("UserID: ")
 
 # reading variables from config file
 config = ConfigParser.ConfigParser()
 config.read('config.ini')
 
-cloudService = config.get('Properties','cloudService')
-expectCmdLine = config.get('Properties','expectCmdLine')
-sshCmdLine = config.get('Properties','sshCmdLine')
+cloudService = config.get('Properties', 'cloudService')
+expectCmdLine = config.get('Properties', 'expectCmdLine')
+sshCmdLine = config.get('Properties', 'sshCmdLine')
 
-mFATimeoutSeconds = int(config.get('Properties','mFATimeoutSeconds'))
-mFAPollForSuccessSeconds = int(config.get('Properties','mFAPollForSuccessSeconds'))
-
-
+mFATimeoutSeconds = int(config.get('Properties', 'mFATimeoutSeconds'))
+mFAPollForSuccessSeconds = int(config.get('Properties', 'mFAPollForSuccessSeconds'))
 
 # Post StartAuthentication using generic url
 # The result will give us the specific vanity URL
@@ -72,301 +70,310 @@ url = 'https://%s/security/StartAuthentication/' % cloudService
 verify = True
 
 headers = {
-	'X-CENTRIFY-NATIVE-CLIENT': '1',
-  'Content-Type': 'application/json'
+    'X-CENTRIFY-NATIVE-CLIENT': '1',
+    'Content-Type': 'application/json'
 }
 
-r = requests.post(url, json = {
-  "User": cloudUser,
-  "Version": "1.0"
-}, headers = headers, verify = verify) 
+r = requests.post(url, json={
+    "User": cloudUser,
+    "Version": "1.0"
+}, headers=headers, verify=verify)
 
 r.raise_for_status
-responseObject = r.json()
+response = r.json()
 
 # Pickup the actual vanity tenant
 # we will use this to redrive the StartAuthentication
 # to initiate the actual login process
-tenant = responseObject["Result"]["PodFqdn"]
-
+tenant = response["Result"]["PodFqdn"]
 
 # Redrive the StartAuthentication using vanity URL
 url = 'https://%s/security/StartAuthentication/' % tenant
 verify = True
 
 headers = {
-	'X-CENTRIFY-NATIVE-CLIENT': '1',
-  'Content-Type': 'application/json'
+    'X-CENTRIFY-NATIVE-CLIENT': '1',
+    'Content-Type': 'application/json'
 }
 
-r = requests.post(url, json = {
-  "User": cloudUser,
-  "Version": "1.0"
-}, headers = headers, verify = verify) 
+r = requests.post(url, json={
+    "User": cloudUser,
+    "Version": "1.0"
+}, headers=headers, verify=verify)
 
 r.raise_for_status
-responseObject = r.json()
+response = r.json()
 
 # Pickup the sessionID. We will need this on subsequent
 # calls to AdvanceAuthentication
 # Pickup the list of challenges
-sessionID = responseObject['Result']['SessionId']
-challengesList = responseObject['Result']['Challenges']
+sessionID = response['Result']['SessionId']
+challengesList = response['Result']['Challenges']
 
 url = 'https://%s/security/AdvanceAuthentication/' % tenant
 verify = True
 
 headers = {
- 	'X-CENTRIFY-NATIVE-CLIENT': '1',
- 	'Content-Type': 'application/json'
+    'X-CENTRIFY-NATIVE-CLIENT': '1',
+    'Content-Type': 'application/json'
 }
 
 challengeListLen = len(challengesList)
 
-for challengeListIndex in range(0,challengeListLen):
-	mechanismsList = challengesList[challengeListIndex]['Mechanisms']
-	mechanismsListLen = len(mechanismsList)
-	
-  # If the mechanismmListLen is 1, then we just use the one
-  # if its more than 1, then we need to ask user what they want to use
-	if mechanismsListLen == 1:
-		index = 0
-	else:
-    # print off each item in mechanism and let user choose
-		for index in range(0,mechanismsListLen):
-			print str(index+1) + ' - ' + mechanismsList[index]['PromptSelectMech']
+for challengeListIndex in range(0, challengeListLen):
+    mechanismsList = challengesList[challengeListIndex]['Mechanisms']
+    mechanismsListLen = len(mechanismsList)
 
-    # decrement their choice by 1 because index is zero based
-		index = int(raw_input("Please select a challenge: ")) - 1
+    # If the mechanismmListLen is 1, then we just use the one
+    # if its more than 1, then we need to ask user what they want to use
+    if mechanismsListLen == 1:
+        index = 0
+    else:
+        # print off each item in mechanism and let user choose
+        for index in range(0, mechanismsListLen):
+            print
+            str(index + 1) + ' - ' + mechanismsList[index]['PromptSelectMech']
 
-  # now we know the mechanism that was chosen 
-	mechanismObject = mechanismsList[index]
-	mechanismID = mechanismObject['MechanismId']
-	
-	# this get tricky. If mechanism is password (UP) or security Q (SQ)
-	# then we need to prompt the user to enter something
-	# UP is slightly different in that we tell them the username we are
-	# prompting.
-	# SQ is same process, just different message. In addition, insert ":"
-	# if not supplied (just for neatness)
-	if mechanismObject['Name'] == 'UP' or mechanismObject['Name'] == 'SQ':
-		if mechanismObject['Name'] == 'UP':
-			userResponse = getpass.getpass(mechanismObject['PromptMechChosen'] + ' for ' + cloudUser + ': ')
+        # decrement their choice by 1 because index is zero based
+        index = int(raw_input("Please select a challenge: ")) - 1
 
-		if mechanismObject['Name'] == 'SQ':
-			if mechanismObject['PromptMechChosen'].endswith(':'):
-				userResponse = getpass.getpass(mechanismObject['PromptMechChosen'])
-			else:
-				userResponse = getpass.getpass(mechanismObject['PromptMechChosen'] + ': ')
+    # now we know the mechanism that was chosen
+    mechanismObject = mechanismsList[index]
+    mechanismID = mechanismObject['MechanismId']
 
-		# UP or SQ, simply call AdvanceAuthentication and provide the "Answer"
-		# that the user has typed
-		url = 'https://%s/security/AdvanceAuthentication/' % tenant
-		verify = True
-		
-		r = requests.post(url, json = { 
-			"SessionId": sessionID, 
-			"MechanismId": mechanismID,
-			"Action": "Answer",
-			"Answer": userResponse 
-		}, headers = headers, verify = verify) 
+    # this get tricky. If mechanism is password (UP) or security Q (SQ)
+    # then we need to prompt the user to enter something
+    # UP is slightly different in that we tell them the username we are
+    # prompting.
+    # SQ is same process, just different message. In addition, insert ":"
+    # if not supplied (just for neatness)
+    if mechanismObject['Name'] == 'UP' or mechanismObject['Name'] == 'SQ':
+        if mechanismObject['Name'] == 'UP':
+            userResponse = getpass.getpass(mechanismObject['PromptMechChosen'] + ' for ' + cloudUser + ': ')
 
-		r.raise_for_status
-		responseObject = r.json()
-		resultObject = responseObject['Result']
+        if mechanismObject['Name'] == 'SQ':
+            if mechanismObject['PromptMechChosen'].endswith(':'):
+                userResponse = getpass.getpass(mechanismObject['PromptMechChosen'])
+            else:
+                userResponse = getpass.getpass(mechanismObject['PromptMechChosen'] + ': ')
 
-		# UP or SQ, if we got back a success == False, then we are toast. Just exit()
-		if responseObject['success'] == False:
-			print "Login failed"
-			sys.exit(0)
+        # UP or SQ, simply call AdvanceAuthentication and provide the "Answer"
+        # that the user has typed
+        url = 'https://%s/security/AdvanceAuthentication/' % tenant
+        verify = True
 
-	# OneTimePassword (OTP) means that user is going to respond to the challenge
-	# OutOfBand. This means that we will simply go into a holding pattern and call
-	# AdvanceAuthentication periodically while Summary == OobPending. If we get
-	# success == False, then we are toast. Just exit()
-	if mechanismObject['Name'] == 'OTP':
-		url = 'https://%s/security/AdvanceAuthentication/' % tenant
-		verify = True
+        r = requests.post(url, json={
+            "SessionId": sessionID,
+            "MechanismId": mechanismID,
+            "Action": "Answer",
+            "Answer": userResponse
+        }, headers=headers, verify=verify)
 
-		r = requests.post(url, json = {
- 			"SessionId": sessionID,
- 			"MechanismId": mechanismID,
- 			"Action": "StartOOB"
-		}, headers = headers, verify = verify) 
+        r.raise_for_status
+        response = r.json()
+        resultObject = response['Result']
 
-		r.raise_for_status
-		responseObject = r.json()
-		resultObject = responseObject['Result']
+        # UP or SQ, if we got back a success == False, then we are toast. Just exit()
+        if response['success'] == False:
+            print
+            "Login failed"
+            sys.exit(0)
 
-		# OTP, if we got back a success == False, then we are toast. Just exit()
-		if responseObject['success'] == False:
-			print "Login failed"
-			sys.exit(0)
+    # OneTimePassword (OTP) means that user is going to respond to the challenge
+    # OutOfBand. This means that we will simply go into a holding pattern and call
+    # AdvanceAuthentication periodically while Summary == OobPending. If we get
+    # success == False, then we are toast. Just exit()
+    if mechanismObject['Name'] == 'OTP':
+        url = 'https://%s/security/AdvanceAuthentication/' % tenant
+        verify = True
 
-		# OTP, if we got back a Summary == OobPending, then wait a time
-		# and then redrive AdvanceAuthentication with Action=Poll
-		if resultObject['Summary'] == "OobPending":
-			waituntil = datetime.datetime.now() + datetime.timedelta(seconds=mFATimeoutSeconds)
+        r = requests.post(url, json={
+            "SessionId": sessionID,
+            "MechanismId": mechanismID,
+            "Action": "StartOOB"
+        }, headers=headers, verify=verify)
 
-			while datetime.datetime.now() < waituntil:
-				time.sleep(mFAPollForSuccessSeconds)
-		
-				r = requests.post(url, json = {
- 												"SessionId": sessionID,
- 												"MechanismId": mechanismID,
- 												"Action": "Poll"
-											}, headers = headers, verify = verify) 
+        r.raise_for_status
+        response = r.json()
+        resultObject = response['Result']
 
-				r.raise_for_status
-				responseObject = r.json()
-				resultObject = responseObject['Result']
+        # OTP, if we got back a success == False, then we are toast. Just exit()
+        if response['success'] == False:
+            print
+            "Login failed"
+            sys.exit(0)
 
-				# If Summary == "LoginSuccess" then this means we received OutOfBand
-				# approval. we need to break out of the "Poll" while loop. 
-				if resultObject['Summary'] == 'LoginSuccess':
-					print "<Approval received>"
-					break
+        # OTP, if we got back a Summary == OobPending, then wait a time
+        # and then redrive AdvanceAuthentication with Action=Poll
+        if resultObject['Summary'] == "OobPending":
+            waituntil = datetime.datetime.now() + datetime.timedelta(seconds=mFATimeoutSeconds)
 
-		# if timeout has expired and Summary is still == OobPending
-		# then we are toast. Just exit()
-		if datetime.datetime.now() > waituntil and resultObject['Summary'] == "OobPending":
-			print "Login failed, MFA timeout"
-			sys.exit(0)
+            while datetime.datetime.now() < waituntil:
+                time.sleep(mFAPollForSuccessSeconds)
 
-	# If challenge is SMS, EMAIL, PhoneCall (PF = PhoneFactor) or OATH
-	# then this gets really tricky. Basically its a combination of the two previous
-	# processes. User can either satisfy the challenge with OutOfBand response or
-	# by typing a code that they received externally. In the case of the OutOfBand response
-	# we simply keep driving AdvanceAuthentication while Summary==OobPending. However, we also
-	# allow the user to type in a code. In this case, we drive AdvanceAuthentication with an 
-	# Action=Answer (like we did for Password and Security Question). When waiting for OobPending
-	# the same timeout rules apply
-	if mechanismObject['Name'] == 'SMS' or mechanismObject['Name'] == 'EMAIL' or mechanismObject['Name'] == 'PF' or mechanismObject['Name'] == 'OATH':
-		url = 'https://%s/security/AdvanceAuthentication/' % tenant
-		verify = True
-		
-		r = requests.post(url, json = {
- 			"SessionId": sessionID,
- 			"MechanismId": mechanismID,
- 			"Action": "StartOOB"
-		}, headers = headers, verify = verify) 
+                r = requests.post(url, json={
+                    "SessionId": sessionID,
+                    "MechanismId": mechanismID,
+                    "Action": "Poll"
+                }, headers=headers, verify=verify)
 
-		r.raise_for_status
-		responseObject = r.json()
-		resultObject = responseObject['Result']
+                r.raise_for_status
+                response = r.json()
+                resultObject = response['Result']
 
-		# If we got back a success==False, then we are toast. Just exit()
-		if responseObject['success'] == False:
-			print "Login failed"
-			sys.exit(0)
+                # If Summary == "LoginSuccess" then this means we received OutOfBand
+                # approval. we need to break out of the "Poll" while loop.
+                if resultObject['Summary'] == 'LoginSuccess':
+                    print
+                    "<Approval received>"
+                    break
 
-		# If we got back a Summary==OobPending, then print the PrompMechChose but wait
-		# for a time. When timer expires, then redrive AdvanceAuthentication with an 
-		# Action=Poll. If user replies by typing something in, then redrive
-		# AdvanceAuthentication with an Action=Answer.
-		if resultObject['Summary'] == "OobPending":
-			waituntil = datetime.datetime.now() + datetime.timedelta(seconds=mFATimeoutSeconds)
-			sys.stdout.write(mechanismObject['PromptMechChosen'] + ': ')
-			sys.stdout.flush()
+        # if timeout has expired and Summary is still == OobPending
+        # then we are toast. Just exit()
+        if datetime.datetime.now() > waituntil and resultObject['Summary'] == "OobPending":
+            print
+            "Login failed, MFA timeout"
+            sys.exit(0)
 
-		while datetime.datetime.now() < waituntil:
-			rlist, _, _ = select([sys.stdin], [], [], mFAPollForSuccessSeconds)
-			if rlist:
-				userResponse = sys.stdin.readline().strip()
+    # If challenge is SMS, EMAIL, PhoneCall (PF = PhoneFactor) or OATH
+    # then this gets really tricky. Basically its a combination of the two previous
+    # processes. User can either satisfy the challenge with OutOfBand response or
+    # by typing a code that they received externally. In the case of the OutOfBand response
+    # we simply keep driving AdvanceAuthentication while Summary==OobPending. However, we also
+    # allow the user to type in a code. In this case, we drive AdvanceAuthentication with an
+    # Action=Answer (like we did for Password and Security Question). When waiting for OobPending
+    # the same timeout rules apply
+    if mechanismObject['Name'] == 'SMS' or mechanismObject['Name'] == 'EMAIL' or mechanismObject['Name'] == 'PF' or
+                    mechanismObject['Name'] == 'OATH':
+        url = 'https://%s/security/AdvanceAuthentication/' % tenant
+        verify = True
 
-				# the user typed something in, so post AdvanceAuthentication with
-				# Action=Answer				
-				url = 'https://%s/security/AdvanceAuthentication/' % tenant
-				verify = True
+        r = requests.post(url, json={
+            "SessionId": sessionID,
+            "MechanismId": mechanismID,
+            "Action": "StartOOB"
+        }, headers=headers, verify=verify)
 
-				r = requests.post(url, json = {
-  					"SessionId": sessionID,
-  					"MechanismId": mechanismID,
-  					"Action": "Answer",
-  					"Answer": userResponse
-						}, headers = headers, verify = verify) 
+        r.raise_for_status
+        response = r.json()
+        resultObject = response['Result']
 
-				r.raise_for_status
-				responseObject = r.json()
-				resultObject = responseObject['Result']
-			else:
-				# the else condition means that the timer expired
-				# so redrive AdvanceAuthentication with Action=Poll
-				r = requests.post(url, json = {
- 												"SessionId": sessionID,
- 												"MechanismId": mechanismID,
- 												"Action": "Poll"
-											}, headers = headers, verify = verify) 
+        # If we got back a success==False, then we are toast. Just exit()
+        if response['success'] == False:
+            print
+            "Login failed"
+            sys.exit(0)
 
-				r.raise_for_status
-				responseObject = r.json()
-				resultObject = responseObject['Result']
+        # If we got back a Summary==OobPending, then print the PrompMechChose but wait
+        # for a time. When timer expires, then redrive AdvanceAuthentication with an
+        # Action=Poll. If user replies by typing something in, then redrive
+        # AdvanceAuthentication with an Action=Answer.
+        if resultObject['Summary'] == "OobPending":
+            waituntil = datetime.datetime.now() + datetime.timedelta(seconds=mFATimeoutSeconds)
+            sys.stdout.write(mechanismObject['PromptMechChosen'] + ': ')
+            sys.stdout.flush()
 
-				# note indentation
-				# this is part of the else condition (timer expired)
-				# if we get success==False, then we are toast so just exit()
-				if responseObject['success'] == False:
-					print "Login failed"
-					sys.exit(0)
+        while datetime.datetime.now() < waituntil:
+            rlist, _, _ = select([sys.stdin], [], [], mFAPollForSuccessSeconds)
+            if rlist:
+                userResponse = sys.stdin.readline().strip()
 
-				# note indentation
-				# this is part of the else condition (timer expired)
-				# if we get Summary==LoginSucess then we need to break
-				# out of the while loop for the datetime check
-				# NOTE: this does NOT break us out of the outer
-				# for loop. We will need to do another check just below this
-				if resultObject['Summary'] == 'LoginSuccess' or resultObject['Summary'] == 'StartNextChallenge':
-					print "<Approval received>"
-					break
+                # the user typed something in, so post AdvanceAuthentication with
+                # Action=Answer
+                url = 'https://%s/security/AdvanceAuthentication/' % tenant
+                verify = True
 
-			# note indentation
-			# this is part of the SMS, EMAIL, PF or OATH if condition
-			# if Summary==LoginSuccess then break out of the while loop
-			if resultObject['Summary'] == 'LoginSuccess':
-				print ""
-				break
+                r = requests.post(url, json={
+                    "SessionId": sessionID,
+                    "MechanismId": mechanismID,
+                    "Action": "Answer",
+                    "Answer": userResponse
+                }, headers=headers, verify=verify)
 
-			# note indentation
-			# this is part of the SMS, EMAIL, PF or OATH if condition
-			# if Summary==StartNextChallenge, then break out of the while loop
-			# and start next challenge in the chain
-			if resultObject['Summary'] == 'StartNextChallenge':
-				break
+                r.raise_for_status
+                response = r.json()
+                resultObject = response['Result']
+            else:
+                # the else condition means that the timer expired
+                # so redrive AdvanceAuthentication with Action=Poll
+                r = requests.post(url, json={
+                    "SessionId": sessionID,
+                    "MechanismId": mechanismID,
+                    "Action": "Poll"
+                }, headers=headers, verify=verify)
 
-		# note indentation
-		# this code is at the same indentation as the while loop, but 
-		# is still part of the SMS, EMAIL, PF or OATH if condition
-		# if we are here, then that means that we have naturally fallen
-		# out of the while loop while Summary==OobPending. This means
-		# that we have timed out waiting for the user to satisfy the 
-		# challenge, thus we are toast so just exit()
-		if resultObject['Summary'] == "OobPending":
-			print "MFA Timeout"
-			sys.exit(0)
+                r.raise_for_status
+                response = r.json()
+                resultObject = response['Result']
 
-	# note indentation
-	# this is on the same level as the for loop for challenge
-	# if we are here, then we have gone thru all of the if conditions
-	# for the various types of challenges. If Summary==StartNextChallenge
-	# then just continue to next challenge 		
-	if resultObject['Summary'] == 'StartNextChallenge':
-		continue
-		
-	# if Summary==LoginSuccess, then we have passed all of the 
-	# challenges and we are ready to proceed
-	# Lets stash away the cookie for use in subsequent calls
-	if resultObject['Summary'] == 'LoginSuccess':
-		auth = resultObject['Auth']
-		cookie = r.cookies['.ASPXAUTH']
-		break
+                # note indentation
+                # this is part of the else condition (timer expired)
+                # if we get success==False, then we are toast so just exit()
+                if response['success'] == False:
+                    print
+                    "Login failed"
+                    sys.exit(0)
 
-	# Sanity check. We should not get here, but just in case
-	# we do.. something has not gone to plan. We are toast, 
-	# so just exit()
-	print "Login Failed"
-	sys.exit(0)
+                # note indentation
+                # this is part of the else condition (timer expired)
+                # if we get Summary==LoginSucess then we need to break
+                # out of the while loop for the datetime check
+                # NOTE: this does NOT break us out of the outer
+                # for loop. We will need to do another check just below this
+                if resultObject['Summary'] == 'LoginSuccess' or resultObject['Summary'] == 'StartNextChallenge':
+                    print
+                    "<Approval received>"
+                    break
 
+            # note indentation
+            # this is part of the SMS, EMAIL, PF or OATH if condition
+            # if Summary==LoginSuccess then break out of the while loop
+            if resultObject['Summary'] == 'LoginSuccess':
+                print
+                ""
+                break
 
+            # note indentation
+            # this is part of the SMS, EMAIL, PF or OATH if condition
+            # if Summary==StartNextChallenge, then break out of the while loop
+            # and start next challenge in the chain
+            if resultObject['Summary'] == 'StartNextChallenge':
+                break
+
+        # note indentation
+        # this code is at the same indentation as the while loop, but
+        # is still part of the SMS, EMAIL, PF or OATH if condition
+        # if we are here, then that means that we have naturally fallen
+        # out of the while loop while Summary==OobPending. This means
+        # that we have timed out waiting for the user to satisfy the
+        # challenge, thus we are toast so just exit()
+        if resultObject['Summary'] == "OobPending":
+            print
+            "MFA Timeout"
+            sys.exit(0)
+
+    # note indentation
+    # this is on the same level as the for loop for challenge
+    # if we are here, then we have gone thru all of the if conditions
+    # for the various types of challenges. If Summary==StartNextChallenge
+    # then just continue to next challenge
+    if resultObject['Summary'] == 'StartNextChallenge':
+        continue
+
+    # if Summary==LoginSuccess, then we have passed all of the
+    # challenges and we are ready to proceed
+    # Lets stash away the cookie for use in subsequent calls
+    if resultObject['Summary'] == 'LoginSuccess':
+        auth = resultObject['Auth']
+        cookie = r.cookies['.ASPXAUTH']
+        break
+
+    # Sanity check. We should not get here, but just in case
+    # we do.. something has not gone to plan. We are toast,
+    # so just exit()
+    print
+    "Login Failed"
+    sys.exit(0)
 
 # Now lets move on to the real work to be done
 # First, lets get the VaultID to use for the
@@ -375,9 +382,9 @@ url = 'https://%s/RedRock/Query' % tenant
 verify = True
 
 headers = {
-  'X-CENTRIFY-NATIVE-CLIENT': '1',
-  'Authorization': 'Bearer %s' % cookie,
-  'Content-Type': 'application/json'
+    'X-CENTRIFY-NATIVE-CLIENT': '1',
+    'Authorization': 'Bearer %s' % cookie,
+    'Content-Type': 'application/json'
 }
 
 sql = ""
@@ -391,64 +398,73 @@ json = {"Script": sql,
         "Args": {"Caching": -1}
         }
 
-r = requests.post(url, json = json, headers = headers, verify = verify) 
+r = requests.post(url, json=json, headers=headers, verify=verify)
 
 r.raise_for_status
-responseObject = r.json()
+response = r.json()
 
 # success!= True, so we are toast. just exit()
-if responseObject['success'] != True:
-	print "Query Failed"
-	sys.exit(0)
+if response['success'] != True:
+    print
+    "Query Failed"
+    sys.exit(0)
 
-count = responseObject['Result']['Count']
+count = response['Result']['Count']
 
 # oops.. There should only be one record returned from the query.
 # if not 1 then we something is wrong. Just exit()
 if count != 1:
-	print "Failed to checkout password."
-	sys.exit(0)
+    print
+    "Failed to checkout password."
+    sys.exit(0)
 
 # Grab the vaultAccountID, serverID and serverName
 # Note: serverID and serverName are not being used at this time
 # so they are technically not necessary. However, we did ask for them
 # in the query above, so lets grab them anyway
-vaultAccountID = responseObject['Result']['Results'][0]['Row']['VaultAccountID']
-serverID = responseObject['Result']['Results'][0]['Row']['ServerID']
-serverName = responseObject['Result']['Results'][0]['Row']['ServerName']
-
+vaultAccountID = response['Result']['Results'][0]['Row']['VaultAccountID']
+serverID = response['Result']['Results'][0]['Row']['ServerID']
+serverName = response['Result']['Results'][0]['Row']['ServerName']
 
 # now lets checkout the password from the cloud service
 url = 'https://%s/ServerManage/CheckoutPassword' % tenant
 verify = True
 
 headers = {
-  'X-CENTRIFY-NATIVE-CLIENT': '1',
-  'Authorization': 'Bearer %s' % cookie,
-  'Content-Type': 'application/json'
+    'X-CENTRIFY-NATIVE-CLIENT': '1',
+    'Authorization': 'Bearer %s' % cookie,
+    'Content-Type': 'application/json'
 }
 
-print 'Initiating password checkout for account: ' + targetAccount + '@' + targetServerFQDN
+print
+'Initiating password checkout for account: ' + targetAccount + '@' + targetServerFQDN
 
-r = requests.post(url, json = {
-  "ID": vaultAccountID,
-  "Lifetime": 1
-}, headers = headers, verify = verify)
+r = requests.post(url, json={
+    "ID": vaultAccountID,
+    "Lifetime": 1
+}, headers=headers, verify=verify)
 
 r.raise_for_status
-responseObject = r.json()
+response = r.json()
 
-password = responseObject['Result']['Password']
+# success!= True, so we are toast. just exit()
+if response['success'] != True:
+    print
+    response['Message']
+    sys.exit(0)
+
+password = response['Result']['Password']
 
 # something went wrong, so just exit
 if password == "":
-	print "password checkout failed"
-	sys.exit(0)
+    print
+    "password checkout failed"
+    sys.exit(0)
 
 # now that we have the password, lets use it to open an ssh connection
-# this will be a synchronous call, thus we will wait until user ends 
-# the session on remote server 
-cmd = expectCmdLine + ' ' + password + ' ' + sshCmdLine + ' ' + targetAccount + '@' + targetServerIP
+# this will be a synchronous call, thus we will wait until user ends
+# the session on remote server
+cmd = expectCmdLine + ' ' + '"' + password + '"' + ' ' + sshCmdLine + ' ' + targetAccount + '@' + targetServerIP
 subprocess.call(shlex.split(cmd))
 
 # now that use has ended session on remote server, we can
@@ -457,26 +473,28 @@ url = 'https://%s/ServerManage/CheckinPassword' % tenant
 verify = True
 
 headers = {
-  'X-CENTRIFY-NATIVE-CLIENT': '1',
-  'Authorization': 'Bearer %s' % cookie,
-  'Content-Type': 'application/json'
+    'X-CENTRIFY-NATIVE-CLIENT': '1',
+    'Authorization': 'Bearer %s' % cookie,
+    'Content-Type': 'application/json'
 }
 
-r = requests.post(url, json = {
-  "ID": vaultAccountID
-}, headers = headers, verify = verify)
+r = requests.post(url, json={
+    "ID": vaultAccountID
+}, headers=headers, verify=verify)
 
 r.raise_for_status
-responseObject = r.json()
+response = r.json()
 
 # something went wrong. Tell the user and exit()
-if responseObject['success'] != True:
-	print "password checkin Failed"
-	sys.exit(0)
+if response['success'] != True:
+    print
+    "password checkin Failed"
+    sys.exit(0)
 
 # everything is fine. Tell the user and exit()
-if responseObject['success'] == True:
-	print "password checkin was successful"
-	sys.exit(0)
+if response['success'] == True:
+    print
+    "password checkin was successful"
+    sys.exit(0)
 
-#EOF
+# EOF
